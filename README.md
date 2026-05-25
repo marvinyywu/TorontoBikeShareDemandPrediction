@@ -10,7 +10,8 @@ I used Bike Share Toronto ridership data from [City of Toronto Open Data](https:
 I built a pipeline that ingests trip data, aggregates it into station-hour demand, creates time and lag features, trains an ML model, and evaluates performance on future holdout data.
 
 ## Models
-- Random Forest Regressor with automated hyperparameter tuning via `RandomizedSearchCV` (20 iterations, 3-fold CV on a 500k-row sample)
+- LightGBM (`LGBMRegressor`) with automated hyperparameter tuning via `RandomizedSearchCV` (20 iterations, 3-fold CV on a 500k-row sample)
+- Chosen over Random Forest for significantly faster training on 39M rows, lower memory usage via histogram binning, and native support for high-cardinality categoricals like `station_id`
 
 ## Results
 Reports Train R², Test R², MAE, and RMSE evaluated on 2025 holdout data.

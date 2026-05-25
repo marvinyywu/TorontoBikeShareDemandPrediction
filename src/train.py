@@ -1,5 +1,6 @@
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
+import pandas as pd
+from lightgbm import LGBMRegressor
 from sklearn.model_selection import RandomizedSearchCV
 import evaluate
 import preprocess
@@ -10,11 +11,30 @@ import preprocess
 _TUNE_SAMPLE_SIZE = 500_000
 
 _PARAM_DIST = {
-    "n_estimators":     [1, 3, 5, 10],
-    "max_depth":        [5, 8, 10, 15, 20],
-    "min_samples_leaf": [10, 25, 50, 100],
-    "max_features":     ["sqrt", 0.5, 1.0],
+    "n_estimators":      [200, 500, 1000],
+    "num_leaves":        [31, 63, 127, 255],
+    "max_depth":         [-1, 8, 15],
+    "min_child_samples": [20, 50, 100],
+    "learning_rate":     [0.05, 0.1, 0.2],
+    "subsample":         [0.7, 0.8, 1.0],
+    "colsample_bytree":  [0.7, 0.8, 1.0],
 }
+
+
+def _compute_baseline(train_df, test_df):
+    means = (
+        train_df.groupby(["station_id", "hour", "day_of_week"])["demand"]
+        .mean()
+        .rename("y_baseline")
+        .reset_index()
+    )
+    return (
+        test_df[["station_id", "hour", "day_of_week"]]
+        .merge(means, on=["station_id", "hour", "day_of_week"], how="left")
+        ["y_baseline"]
+        .fillna(0)
+        .values
+    )
 
 
 def _tune_hyperparameters(X_train, y_train):
@@ -26,12 +46,12 @@ def _tune_hyperparameters(X_train, y_train):
         X_sample, y_sample = X_train, y_train
 
     search = RandomizedSearchCV(
-        RandomForestRegressor(random_state=42),
+        LGBMRegressor(random_state=42, n_jobs=-1, verbose=-1),
         param_distributions=_PARAM_DIST,
         n_iter=20,
         cv=3,
         scoring="neg_root_mean_squared_error",
-        n_jobs=-1,
+        n_jobs=1,  # avoid nested parallelism: LGBMRegressor already uses n_jobs=-1
         random_state=42,
         verbose=1,
     )
@@ -63,10 +83,15 @@ def train_model(df=None):
     X_test  = test_df.drop(columns="demand").values
     y_test  = test_df["demand"].values
 
+    print("\n--- Baseline (station × hour × day_of_week mean) ---")
+    y_baseline = _compute_baseline(train_df, test_df)
+    evaluate.evaluate_predictions(y_test, y_baseline, label="Baseline")
+
+    print(f"\n--- LightGBM ---")
     print(f"Tuning hyperparameters on a {_TUNE_SAMPLE_SIZE:,}-row sample...")
     best_params = _tune_hyperparameters(X_train, y_train)
 
-    model = RandomForestRegressor(**best_params, n_jobs=-1, random_state=42)
+    model = LGBMRegressor(**best_params, n_jobs=-1, random_state=42, verbose=-1)
     model.fit(X_train, y_train)
 
     evaluate.evaluate_model(model, X_train, y_train, X_test, y_test)
