@@ -20,6 +20,8 @@ def _cache_is_valid() -> bool:
 
 def preprocess_data(df=None):
 
+    print("Starting data preprocessing...")
+
     if df is None and _cache_is_valid():
         return pd.read_parquet(_CACHE_PATH)
 

@@ -21,6 +21,10 @@ def _normalize(col: str) -> str:
 
 
 def ingest_data():
+
+    print("Starting data ingestion...")
+
+
     year_dirs = sorted(_DATASETS_ROOT.glob("bikeshare-ridership-[0-9][0-9][0-9][0-9]"))
 
     dfs = []
