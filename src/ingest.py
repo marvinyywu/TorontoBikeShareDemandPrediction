@@ -1,47 +1,50 @@
+import re
 from pathlib import Path
+import logging
 
 import pandas as pd
 
-_DATASETS_ROOT = Path(__file__).parent.parent / "datasets"
+log = logging.getLogger(__name__)
 
-_DATETIME_FORMATS = {
-    2021: "%m/%d/%Y %H:%M",
-    2022: "%m/%d/%Y %H:%M",
-    2023: "%m/%d/%Y %H:%M",
-    2024: "%Y-%m-%d %H:%M:%S",
-    # 2025 files contain both HH:MM and HH:MM:SS rows, so per-element inference is needed
-    2025: "mixed",
-}
+_DATASETS_ROOT = Path(__file__).parent.parent / "data" / "raw"
 
-_NEEDED_COLS = {"Start_Station_Id", "Start_Time"}
+# Normalized column names required from each raw CSV (used by the usecols filter below)
+_NEEDED_COLS = frozenset({"Start_Station_Id", "Start_Time"})
 
 
-def _normalize(col: str) -> str:
+def _normalize_col(col: str) -> str:
     return col.strip().replace("﻿", "").replace(" ", "_")
 
 
-def ingest_data():
-
-    print("Starting data ingestion...")
-
+def ingest_data() -> list[tuple[int, pd.DataFrame]]:
+    log.info("Starting data ingestion...")
 
     year_dirs = sorted(_DATASETS_ROOT.glob("bikeshare-ridership-[0-9][0-9][0-9][0-9]"))
 
-    dfs = []
+    results: list[tuple[int, pd.DataFrame]] = []
     for year_dir in year_dirs:
-        year = int(year_dir.name.split("-")[-1])
-        fmt = _DATETIME_FORMATS.get(year, "mixed")
-        for f in sorted(year_dir.glob("*.csv")):
-            df = pd.read_csv(
-                f,
-                encoding="cp1252",
-                usecols=lambda c: _normalize(c) in _NEEDED_COLS,
-            )
-            df.columns = [_normalize(c) for c in df.columns]
-            df["Start_Time"] = pd.to_datetime(df["Start_Time"], format=fmt)
-            dfs.append(df)
+        m = re.search(r"(\d{4})$", year_dir.name)
+        if not m:
+            log.warning(f"Skipping unexpected directory: {year_dir.name}")
+            continue
+        year = int(m.group(1))
 
-    if not dfs:
+        for f in sorted(year_dir.glob("*.csv")):
+            log.info(f"Loading {f.name} (year={year})...")
+            try:
+                df = pd.read_csv(
+                    f,
+                    encoding="cp1252",
+                    usecols=lambda c: _normalize_col(c) in _NEEDED_COLS,
+                )
+            except Exception as e:
+                log.warning(f"Skipping {f.name}: {e}")
+                continue
+            results.append((year, df))
+
+    if not results:
         raise FileNotFoundError(f"No bikeshare CSV files found under {_DATASETS_ROOT}")
 
-    return pd.concat(dfs, ignore_index=True)
+    total_rows = sum(len(df) for _, df in results)
+    log.info(f"Ingestion complete: {len(results)} files, {total_rows:,} rows.")
+    return results
